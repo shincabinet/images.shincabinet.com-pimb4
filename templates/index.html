@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>ShinCabinet Image Manager</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>ShinCabinet Image Manager</h1>
+      <p>{{ public_base_url }}</p>
+    </div>
+    <div class="topbar-actions">
+      <span id="disk-usage" class="muted"></span>
+      <form action="/logout" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="secondary" type="submit">Sign out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="toolbar card">
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="toolbar-actions">
+        <button id="new-folder" class="secondary">New folder</button>
+        <label class="button-like">
+          Upload images
+          <input id="file-input" type="file" accept="image/*" multiple hidden>
+        </label>
+      </div>
+    </section>
+
+    <section class="card upload-panel hidden" id="upload-panel">
+      <div class="upload-panel-head">
+        <div>
+          <strong>Upload queue</strong>
+          <div class="muted">Maximum request size: {{ max_upload_mb }} MB</div>
+        </div>
+        <label class="check"><input id="overwrite" type="checkbox"> overwrite existing files</label>
+      </div>
+      <div id="upload-list" class="upload-list"></div>
+      <div class="actions-row">
+        <button id="start-upload">Upload</button>
+        <button id="cancel-upload" class="secondary">Cancel</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div id="message"></div>
+      <div id="empty-state" class="empty hidden">This folder is empty.</div>
+      <div id="grid" class="image-grid"></div>
+    </section>
+  </main>
+
+  <dialog id="folder-dialog">
+    <form method="dialog" class="dialog-card" id="folder-form">
+      <h2>New folder</h2>
+      <label>
+        Folder name
+        <input id="folder-name" required maxlength="120" autocomplete="off">
+      </label>
+      <div class="actions-row">
+        <button value="cancel" class="secondary">Cancel</button>
+        <button value="default" id="create-folder">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="move-dialog">
+    <form method="dialog" class="dialog-card" id="move-form">
+      <h2>Rename / move</h2>
+      <p class="muted" id="move-source"></p>
+      <label>
+        New relative path
+        <input id="move-destination" required autocomplete="off">
+      </label>
+      <div class="actions-row">
+        <button value="cancel" class="secondary">Cancel</button>
+        <button value="default" id="move-confirm">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

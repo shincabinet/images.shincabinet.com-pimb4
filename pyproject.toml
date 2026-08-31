@@ -1,0 +1,10 @@
+[project]
+name = "shincabinet-image-manager"
+version = "0.1.0"
+description = "Private image manager for images.shincabinet.com"
+requires-python = ">=3.11"
+dependencies = [
+  "Flask>=3.1",
+  "Pillow>=11",
+  "gunicorn>=23",
+]

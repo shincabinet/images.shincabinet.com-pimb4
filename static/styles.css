@@ -1,0 +1,84 @@
+:root {
+  color-scheme: dark;
+  --bg: #171613;
+  --panel: #21201c;
+  --panel-2: #2a2823;
+  --text: #f2eee5;
+  --muted: #aaa398;
+  --border: #3b3831;
+  --accent: #d7c6a7;
+  --danger: #e88888;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button, input { font: inherit; }
+button, .button-like {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #191713;
+  border-radius: 8px;
+  padding: .65rem .9rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+button.danger { background: transparent; color: var(--danger); border-color: #754848; }
+input[type="text"], input[type="password"], dialog input:not([type="checkbox"]) {
+  width: 100%; background: #151411; color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: .7rem .75rem; margin-top: .4rem;
+}
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.4rem; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.topbar h1 { margin: 0; font-size: 1.2rem; }
+.topbar p { margin: .2rem 0 0; color: var(--muted); }
+.topbar-actions { display: flex; align-items: center; gap: 1rem; }
+.layout { max-width: 1440px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.toolbar-actions, .actions-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.breadcrumbs { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
+.breadcrumbs button { background: transparent; color: var(--text); border: 0; padding: .2rem .35rem; }
+.breadcrumbs .sep { color: var(--muted); }
+.image-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;
+}
+.item { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel-2); }
+.item-preview { aspect-ratio: 1 / 1; display: grid; place-items: center; background: #151411; overflow: hidden; }
+.item-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.folder-icon { font-size: 4rem; opacity: .8; }
+.item-body { padding: .8rem; display: grid; gap: .55rem; }
+.item-name { font-weight: 650; word-break: break-word; }
+.item-meta { color: var(--muted); font-size: .85rem; min-height: 1.2em; }
+.item-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.item-actions button, .item-actions a { font-size: .83rem; padding: .45rem .55rem; }
+.item-actions a { border: 1px solid var(--border); color: var(--text); border-radius: 7px; text-decoration: none; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+.empty { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+.alert { padding: .75rem; border-radius: 8px; margin-bottom: .8rem; }
+.alert.error { background: #4a2424; }
+.alert.success { background: #23452e; }
+.upload-panel { display: grid; gap: .8rem; }
+.upload-panel-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.upload-list { display: grid; gap: .35rem; }
+.upload-row { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--border); padding: .35rem 0; }
+.check { color: var(--muted); }
+dialog { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 2rem)); }
+dialog::backdrop { background: rgb(0 0 0 / .65); }
+.dialog-card { padding: 1.2rem; display: grid; gap: 1rem; }
+.dialog-card h2 { margin: 0; }
+.login-page { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+.login-card { width: min(430px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.4rem; }
+.login-card h1 { margin-top: 0; }
+.stack { display: grid; gap: 1rem; }
+@media (max-width: 720px) {
+  .topbar, .toolbar, .upload-panel-head { align-items: stretch; flex-direction: column; }
+  .topbar-actions { justify-content: space-between; }
+}

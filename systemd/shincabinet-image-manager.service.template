@@ -1,0 +1,23 @@
+[Unit]
+Description=ShinCabinet Image Manager
+After=network-online.target mnt-storage.mount
+Wants=network-online.target
+RequiresMountsFor=/mnt/storage
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=/etc/shincabinet-image-manager.env
+ExecStart=__APP_DIR__/.venv/bin/gunicorn --workers 2 --threads 4 --bind ${SHIN_IMAGE_MANAGER_HOST}:${SHIN_IMAGE_MANAGER_PORT} --access-logfile - --error-logfile - app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/mnt/storage/shincabinet-images
+
+[Install]
+WantedBy=multi-user.target
