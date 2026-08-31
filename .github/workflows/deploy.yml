@@ -1,0 +1,70 @@
+name: Deploy Raspberry Pi Image Manager
+
+on: [push]
+
+concurrency:
+  group: raspberry-pi-image-manager
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+
+    steps:
+      - name: Checkout pushed branch
+        uses: actions/checkout@v6
+
+      - name: Show deployment information
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Commit: $GITHUB_SHA"
+          echo "Runner: $RUNNER_NAME"
+
+      - name: Deploy application
+        run: |
+          rsync -a --delete \
+            --exclude='.venv/' \
+            "$GITHUB_WORKSPACE/" \
+            /opt/images.shincabinet.com-pimb4/
+
+      - name: Set up Python environment
+        run: |
+          cd /opt/images.shincabinet.com-pimb4
+
+          if [ ! -d .venv ]; then
+            python3 -m venv .venv
+          fi
+
+          .venv/bin/python -m pip install --upgrade pip
+
+          if [ -f requirements.txt ]; then
+            .venv/bin/pip install -r requirements.txt
+          fi
+
+      - name: Restart Image Manager if installed
+        run: |
+          if systemctl list-unit-files \
+              | grep -q '^shincabinet-image-manager.service'; then
+
+            sudo -n systemctl restart shincabinet-image-manager.service
+            sudo -n systemctl is-active shincabinet-image-manager.service
+
+            sleep 2
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              http://127.0.0.1:8090/ \
+              >/dev/null
+
+            echo "Image Manager restarted successfully."
+          else
+            echo "Image Manager service has not been installed yet."
+            echo "Repository deployment completed."
+            echo "Run scripts/install.sh on the Raspberry Pi once."
+          fi
