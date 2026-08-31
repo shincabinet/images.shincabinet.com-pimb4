@@ -58,3 +58,31 @@ The `id` is the value that should be stored in the primary website configuration
 `POST /api/image/<image-id>/replace` accepts multipart field `file`.
 
 The backing filename may change, including its extension. The Image ID is preserved and its revision is incremented. Old generated derivatives are invalidated automatically.
+
+## Flat catalog API
+
+The website Site Manager can browse the image host without recursively walking folders:
+
+```http
+GET /api/catalog
+Authorization: Bearer <token>
+```
+
+Optional search:
+
+```http
+GET /api/catalog?q=shinji
+```
+
+Each image includes its permanent `img_...` ID, path, dimensions, size, revision, original URL, and thumbnail URL.
+
+## Legacy path lookup
+
+```http
+GET /api/lookup?path=characters/shinji/reference.png
+Authorization: Bearer <token>
+```
+
+For migration, `/assets/images/characters/shinji/reference.png` is also accepted. The response returns the permanent `img_...` ID registered for that file path.
+
+These APIs are authenticated. `/i/<img_id>` remains public because it is the image-serving endpoint used by `images.shincabinet.com`.

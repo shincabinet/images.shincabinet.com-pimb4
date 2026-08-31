@@ -353,6 +353,47 @@ def is_image_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
 
 
+
+def catalog_items() -> list[dict]:
+    """Return a flat, authenticated catalog for other management tools.
+
+    The public website never needs this API; it is intended for the local
+    shincabinet.com Site Manager over Tailscale. Stable image IDs remain the
+    contract while paths may change.
+    """
+    with registry_lock(exclusive=False):
+        registry = load_registry_unlocked()
+        entries = [(image_id, dict(entry)) for image_id, entry in registry["images"].items() if isinstance(entry, dict)]
+
+    result: list[dict] = []
+    for image_id, entry in entries:
+        try:
+            relative = normalize_relative(str(entry.get("path") or ""), allow_empty=False)
+            target = disk_path(relative)
+        except ValueError:
+            continue
+        exists = target.exists() and is_image_file(target)
+        width, height = image_dimensions(target) if exists else (None, None)
+        stat = target.stat() if exists else None
+        result.append({
+            "id": image_id,
+            "path": relative_string(relative),
+            "name": target.name,
+            "url": id_url(image_id),
+            "directUrl": public_url(relative),
+            "thumbnailUrl": f"{settings.public_base_url}/i/{image_id}?max={settings.thumbnail_size}",
+            "revision": int(entry.get("revision") or 1),
+            "updatedAt": entry.get("updatedAt"),
+            "createdAt": entry.get("createdAt"),
+            "exists": exists,
+            "width": width,
+            "height": height,
+            "size": stat.st_size if stat else 0,
+            "modified": int(stat.st_mtime) if stat else None,
+        })
+    result.sort(key=lambda item: (str(item.get("path") or "").lower(), item["id"]))
+    return result
+
 def image_dimensions(path: Path) -> tuple[int | None, int | None]:
     if Image is None:
         return None, None
@@ -517,6 +558,45 @@ def api_list():
         "items": items,
     })
 
+
+
+@app.get("/api/catalog")
+def api_catalog():
+    query = str(request.args.get("q") or "").strip().lower()
+    items = catalog_items()
+    if query:
+        items = [item for item in items if query in f"{item['id']} {item['path']} {item['name']}".lower()]
+    return jsonify({"items": items, "count": len(items)})
+
+
+@app.get("/api/lookup")
+def api_lookup():
+    raw = str(request.args.get("path") or "").strip()
+    if raw.startswith("/assets/images/"):
+        raw = raw[len("/assets/images/"):]
+    raw = raw.split("?", 1)[0].split("#", 1)[0]
+    relative = normalize_relative(raw, allow_empty=False)
+    relative_text = relative_string(relative)
+    with registry_lock(exclusive=False):
+        registry = load_registry_unlocked()
+        image_id = find_id_for_path_unlocked(registry, relative_text)
+        entry = dict(registry["images"][image_id]) if image_id else None
+    if not image_id or entry is None:
+        return jsonify({"error": "No image ID is registered for that path."}), 404
+    target = disk_path(relative)
+    width, height = image_dimensions(target) if target.exists() else (None, None)
+    return jsonify({
+        "id": image_id,
+        "path": relative_text,
+        "url": id_url(image_id),
+        "directUrl": public_url(relative),
+        "thumbnailUrl": f"{settings.public_base_url}/i/{image_id}?max={settings.thumbnail_size}",
+        "revision": int(entry.get("revision") or 1),
+        "exists": target.exists(),
+        "width": width,
+        "height": height,
+        "size": target.stat().st_size if target.exists() else 0,
+    })
 
 @app.get("/i/<image_id>")
 def public_image_by_id(image_id: str):

@@ -183,3 +183,9 @@ The administrative Image Manager can continue to be reached over Tailscale Serve
 ## Security
 
 The `/i/<id>` route is intentionally unauthenticated because it is the public artwork delivery route. The management UI and write APIs remain authenticated. Direct static files are still subject to your existing Nginx rules.
+
+## Website Site Manager integration
+
+The primary `shincabinet.com` Site Manager can connect to this service over Tailscale using the API token. It uses `/api/catalog` to browse permanent `img_...` IDs, `/api/lookup` to migrate legacy paths, and `/api/image/<id>/replace` to replace a backing file while preserving the ID.
+
+The public website still loads images through `/i/<img_id>` via the existing Nginx/Cloudflare Tunnel route.
