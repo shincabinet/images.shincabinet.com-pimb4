@@ -86,3 +86,31 @@ Authorization: Bearer <token>
 For migration, `/assets/images/characters/shinji/reference.png` is also accepted. The response returns the permanent `img_...` ID registered for that file path.
 
 These APIs are authenticated. `/i/<img_id>` remains public because it is the image-serving endpoint used by `images.shincabinet.com`.
+
+## Website stable aliases
+
+The public website can use its own permanent IDs independently of Raspberry Pi filenames and `img_...` IDs.
+
+Authenticated management endpoints:
+
+```http
+PUT /api/alias/siteimg_<32hex>
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"imageId":"img_<32hex>"}
+```
+
+```http
+GET /api/alias/siteimg_<32hex>
+DELETE /api/alias/siteimg_<32hex>
+```
+
+Public read-only image endpoint:
+
+```text
+https://images.shincabinet.com/s/siteimg_<32hex>
+https://images.shincabinet.com/s/siteimg_<32hex>?max=2048
+```
+
+Repointing a `siteimg_...` alias to another `img_...` changes every website usage immediately without requiring a website deployment. Replacing the file behind the same `img_...` also preserves the alias automatically.

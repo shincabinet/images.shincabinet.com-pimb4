@@ -189,3 +189,7 @@ The `/i/<id>` route is intentionally unauthenticated because it is the public ar
 The primary `shincabinet.com` Site Manager can connect to this service over Tailscale using the API token. It uses `/api/catalog` to browse permanent `img_...` IDs, `/api/lookup` to migrate legacy paths, and `/api/image/<id>/replace` to replace a backing file while preserving the ID.
 
 The public website still loads images through `/i/<img_id>` via the existing Nginx/Cloudflare Tunnel route.
+
+## Website-owned aliases
+
+`siteimg_...` IDs are now first-class public aliases. The primary website requests `/s/siteimg_...`; the image manager maps that alias to the current `img_...` entry in `.image-index.json`. Run `sudo ./scripts/install-nginx-dynamic-route.sh` after upgrading so Nginx proxies both `/i/` and `/s/` to port 8090.

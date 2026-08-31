@@ -83,6 +83,7 @@ settings = load_settings()
 settings.storage_root.mkdir(parents=True, exist_ok=True)
 
 IMAGE_ID_RE = re.compile(r"^img_[0-9a-f]{32}$")
+SITE_IMAGE_ID_RE = re.compile(r"^siteimg_[0-9a-f]{32}$")
 REGISTRY_FILE = settings.storage_root / ".image-index.json"
 REGISTRY_BACKUP_FILE = settings.storage_root / ".image-index.json.bak"
 REGISTRY_LOCK_FILE = settings.storage_root / ".image-index.lock"
@@ -102,7 +103,7 @@ def registry_lock(*, exclusive: bool):
 
 
 def empty_registry() -> dict:
-    return {"version": 1, "images": {}}
+    return {"version": 2, "images": {}, "aliases": {}}
 
 
 def load_registry_unlocked() -> dict:
@@ -114,7 +115,9 @@ def load_registry_unlocked() -> dict:
         return empty_registry()
     if not isinstance(payload, dict) or not isinstance(payload.get("images"), dict):
         return empty_registry()
-    payload.setdefault("version", 1)
+    if not isinstance(payload.get("aliases"), dict):
+        payload["aliases"] = {}
+    payload["version"] = max(2, int(payload.get("version") or 1))
     return payload
 
 
@@ -136,6 +139,13 @@ def valid_image_id(value: str | None) -> str:
     return image_id
 
 
+def valid_site_image_id(value: str | None) -> str:
+    site_image_id = str(value or "").strip().lower()
+    if not SITE_IMAGE_ID_RE.fullmatch(site_image_id):
+        raise ValueError("Invalid website image ID.")
+    return site_image_id
+
+
 def new_image_id(registry: dict) -> str:
     while True:
         image_id = f"img_{uuid.uuid4().hex}"
@@ -145,6 +155,44 @@ def new_image_id(registry: dict) -> str:
 
 def id_url(image_id: str) -> str:
     return f"{settings.public_base_url}/i/{image_id}"
+
+
+def site_alias_url(site_image_id: str) -> str:
+    return f"{settings.public_base_url}/s/{site_image_id}"
+
+
+def alias_image_id(site_image_id: str) -> str | None:
+    site_image_id = valid_site_image_id(site_image_id)
+    with registry_lock(exclusive=False):
+        registry = load_registry_unlocked()
+        image_id = registry.get("aliases", {}).get(site_image_id)
+    return valid_image_id(image_id) if image_id else None
+
+
+def set_alias(site_image_id: str, image_id: str) -> dict:
+    site_image_id = valid_site_image_id(site_image_id)
+    image_id = valid_image_id(image_id)
+    with registry_lock(exclusive=True):
+        registry = load_registry_unlocked()
+        if image_id not in registry["images"]:
+            raise ValueError("Unknown Raspberry Pi image ID.")
+        aliases = registry.setdefault("aliases", {})
+        aliases[site_image_id] = image_id
+        save_registry_unlocked(registry)
+        entry = dict(registry["images"][image_id])
+    return {"siteImageId": site_image_id, "imageId": image_id, "url": site_alias_url(site_image_id), "revision": int(entry.get("revision") or 1)}
+
+
+def delete_alias(site_image_id: str) -> bool:
+    site_image_id = valid_site_image_id(site_image_id)
+    with registry_lock(exclusive=True):
+        registry = load_registry_unlocked()
+        aliases = registry.setdefault("aliases", {})
+        existed = site_image_id in aliases
+        aliases.pop(site_image_id, None)
+        if existed:
+            save_registry_unlocked(registry)
+    return existed
 
 
 def cache_path_for(image_id: str, revision: int, max_dimension: int, source: Path) -> Path:
@@ -437,7 +485,7 @@ def valid_api_token() -> bool:
 
 @app.before_request
 def protect_routes():
-    if request.path.startswith("/static/") or request.path.startswith("/i/") or request.endpoint in {"login", "health"}:
+    if request.path.startswith("/static/") or request.path.startswith("/i/") or request.path.startswith("/s/") or request.endpoint in {"login", "health"}:
         return None
     if not logged_in() and not (request.path.startswith("/api/") and valid_api_token()):
         if request.path.startswith("/api/"):
@@ -508,6 +556,8 @@ def api_config():
         "cloudflareThumbnails": settings.transform_thumbnails,
         "dynamicIds": True,
         "dynamicBaseUrl": f"{settings.public_base_url}/i/",
+        "siteAliasBaseUrl": f"{settings.public_base_url}/s/",
+        "siteAliases": True,
         "disk": {"total": usage.total, "used": usage.used, "free": usage.free},
     })
 
@@ -598,8 +648,38 @@ def api_lookup():
         "size": target.stat().st_size if target.exists() else 0,
     })
 
-@app.get("/i/<image_id>")
-def public_image_by_id(image_id: str):
+@app.get("/api/alias/<site_image_id>")
+def api_alias_metadata(site_image_id: str):
+    site_image_id = valid_site_image_id(site_image_id)
+    image_id = alias_image_id(site_image_id)
+    if not image_id:
+        return jsonify({"error": "Website image alias is not mapped."}), 404
+    entry = registry_entry(image_id)
+    return jsonify({
+        "siteImageId": site_image_id,
+        "imageId": image_id,
+        "url": site_alias_url(site_image_id),
+        "imageUrl": id_url(image_id),
+        "revision": int((entry or {}).get("revision") or 1),
+    })
+
+
+@app.put("/api/alias/<site_image_id>")
+def api_set_alias(site_image_id: str):
+    require_csrf()
+    payload = request.get_json(silent=True) or {}
+    result = set_alias(site_image_id, str(payload.get("imageId") or ""))
+    return jsonify({"ok": True, **result})
+
+
+@app.delete("/api/alias/<site_image_id>")
+def api_delete_alias(site_image_id: str):
+    require_csrf()
+    existed = delete_alias(site_image_id)
+    return jsonify({"ok": True, "deleted": existed, "siteImageId": valid_site_image_id(site_image_id)})
+
+
+def serve_registered_image(image_id: str, *, public_id: str | None = None):
     image_id = valid_image_id(image_id)
     entry = registry_entry(image_id)
     if entry is None:
@@ -616,12 +696,29 @@ def public_image_by_id(image_id: str):
     max_dimension = max(0, min(max_dimension, 8192))
     served = resized_path(image_id, entry, source, max_dimension) if max_dimension else source
     revision = int(entry.get("revision") or 1)
-    etag = f"{image_id}-r{revision}-m{max_dimension or 0}"
+    etag_id = public_id or image_id
+    etag = f"{etag_id}-{image_id}-r{revision}-m{max_dimension or 0}"
     response = send_file(served, conditional=True, etag=etag, max_age=0, download_name=source.name)
     response.headers["Cache-Control"] = "public, no-cache, must-revalidate"
     response.headers["X-Shin-Image-Id"] = image_id
     response.headers["X-Shin-Image-Revision"] = str(revision)
+    if public_id:
+        response.headers["X-Shin-Site-Image-Id"] = public_id
     return response
+
+
+@app.get("/s/<site_image_id>")
+def public_image_by_site_alias(site_image_id: str):
+    site_image_id = valid_site_image_id(site_image_id)
+    image_id = alias_image_id(site_image_id)
+    if not image_id:
+        return jsonify({"error": "Website image alias is not mapped."}), 404
+    return serve_registered_image(image_id, public_id=site_image_id)
+
+
+@app.get("/i/<image_id>")
+def public_image_by_id(image_id: str):
+    return serve_registered_image(image_id)
 
 
 @app.get("/api/image/<image_id>")

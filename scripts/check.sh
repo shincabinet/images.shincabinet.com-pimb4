@@ -27,6 +27,7 @@ p=Path('/mnt/storage/shincabinet-images/.image-index.json')
 data=json.loads(p.read_text())
 print(f"registry: {p}")
 print(f"image IDs: {len(data.get('images', {}))}")
+print(f"site aliases: {len(data.get('aliases', {}))}")
 PY
 else
   echo "Registry has not been created yet. Restart the image manager after updating."
@@ -36,7 +37,7 @@ echo
 echo "== nginx dynamic ID route =="
 if grep -q 'SHINCABINET_DYNAMIC_IMAGES_BEGIN' /etc/nginx/sites-enabled/images.shincabinet.com 2>/dev/null || \
    grep -q 'SHINCABINET_DYNAMIC_IMAGES_BEGIN' /etc/nginx/sites-available/images.shincabinet.com 2>/dev/null; then
-  echo "dynamic /i/ proxy: configured"
+  echo "dynamic /i/ + /s/ proxy marker: configured"
 else
   echo "dynamic /i/ proxy: NOT FOUND"
   echo "Run: sudo ./scripts/install-nginx-dynamic-route.sh"
