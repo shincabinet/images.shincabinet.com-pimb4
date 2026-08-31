@@ -1,229 +1,185 @@
-# ShinCabinet Image Manager
+# ShinCabinet Image Manager — Dynamic Image IDs
 
-A small private web application for managing the artwork served by `https://images.shincabinet.com`.
+Private Raspberry Pi image-management application for `https://images.shincabinet.com`.
 
-**The image files are never stored in this Git repository.** They live directly on the Raspberry Pi at:
-
-```text
-/mnt/storage/shincabinet-images/
-```
-
-Nginx continues to serve that directory publicly through the existing Cloudflare Tunnel at `images.shincabinet.com`. This manager is a separate administrative application, normally exposed at something like `manage-images.shincabinet.com` through the same Cloudflare Tunnel.
-
-## What it does
-
-- Browse image folders on the 5 TB HDD.
-- Upload one or many images directly to the HDD.
-- Create folders.
-- Rename or move images/folders.
-- Delete images and empty folders.
-- Display dimensions and file size when available.
-- Copy the permanent public URL for an image with one click.
-- Open the untouched original image.
-- Use Cloudflare transformed thumbnails in the manager UI so browsing does not repeatedly download huge originals.
-- Password-protected session login.
-- Optional bearer-token API for future Site Manager integration.
-- Refuses hidden paths, `..` traversal, symlinks, and non-image uploads.
-
-The filesystem is the source of truth. There is no image database to lose or synchronize.
-
-## Intended architecture
-
-```text
-Your desktop browser
-        |
-        | HTTPS
-        v
-manage-images.shincabinet.com
-        |
-        v
-Cloudflare Tunnel
-        |
-        v
-127.0.0.1:8090
-ShinCabinet Image Manager
-        |
-        v
-/mnt/storage/shincabinet-images
-        |
-        +-----------------------------+
-                                      |
-                                      v
-                         Nginx 127.0.0.1:8080
-                                      |
-                                      v
-                         images.shincabinet.com
-```
-
-Your website repository stores only URLs/metadata. Example:
-
-```javascript
-image: "https://images.shincabinet.com/gallery/shinji/lounge.webp"
-```
-
-## Suggested storage structure
+Artwork is **not stored in Git**. Originals live at:
 
 ```text
 /mnt/storage/shincabinet-images/
+```
+
+The important difference in this version is that website content no longer needs to know the file path. Every image gets a permanent ID such as:
+
+```text
+img_9f73c215bf6a46b78973b6317dc16c3a
+```
+
+The public stable URL is:
+
+```text
+https://images.shincabinet.com/i/img_9f73c215bf6a46b78973b6317dc16c3a
+```
+
+The website should store the **ID**, not that URL. The website runtime constructs the URL from the configured image host.
+
+## Why IDs
+
+An ID points to the current backing file through `/mnt/storage/shincabinet-images/.image-index.json`.
+
+```text
+Website slot
+  image = img_9f73...
+          |
+          v
+images.shincabinet.com/i/img_9f73...
+          |
+          v
+Image Manager registry
+          |
+          +--> gallery/shinji/old-name.png
+```
+
+If that image is replaced with `gallery/shinji/new-render.webp`, the ID remains unchanged. Every character, gallery entry, alternative image, commission example, etc. using that ID changes automatically.
+
+Moving/renaming a managed file also preserves its ID.
+
+## Dynamic web-sized delivery
+
+The stable route supports a `max` query parameter:
+
+```text
+https://images.shincabinet.com/i/img_9f73...?max=2048
+```
+
+The original remains untouched on disk. The manager creates a cached derivative in its hidden `.dynamic-cache` directory only when the original is larger than the requested bound. Aspect ratio is preserved and smaller images are never upscaled.
+
+When an image is replaced under the same ID:
+
+1. the ID revision increases;
+2. cached derivatives for that ID are removed;
+3. the next request rebuilds the derivative from the new original.
+
+This avoids stale Cloudflare Image Transformation results for stable IDs. Legacy/direct URL images can still use Cloudflare transformations during migration.
+
+## Files created on the HDD
+
+```text
+/mnt/storage/shincabinet-images/
+├── .image-index.json       # CRITICAL: ID -> file mapping
+├── .image-index.lock
+├── .dynamic-cache/         # disposable generated derivatives
 ├── gallery/
-│   ├── shinji-lounge/
-│   │   ├── primary.webp
-│   │   └── alt-01.webp
-│   └── bird-oc/
-│       └── primary.png
 ├── characters/
-│   ├── shinji/
-│   │   ├── reference/
-│   │   └── gallery/
-│   └── kite/
-│       ├── reference/
-│       └── gallery/
 ├── adoptables/
 └── misc/
 ```
 
-## Raspberry Pi installation
+**Back up `.image-index.json` with your artwork.** The IDs in this file are what the primary website stores. Losing it and regenerating IDs would require relinking the website.
 
-Clone this repository somewhere that will remain on the Pi. `/opt` is a good choice:
+`.dynamic-cache/` does not need to be backed up.
+
+## Manager features
+
+- Browse folders on the 5 TB HDD.
+- Upload multiple images.
+- Automatically assign an ID to every new image.
+- Automatically index pre-existing image files.
+- Copy an image ID.
+- Copy the stable `/i/<id>` URL.
+- Replace an image while preserving its ID.
+- Rename/move files while preserving IDs.
+- Delete images and remove their IDs.
+- Serve web-sized derivatives with `?max=`.
+- Display image dimensions and file sizes.
+- Password-protected browser UI.
+- Optional bearer-token API.
+- Refuses to start when `/mnt/storage` is not actually mounted.
+
+## Architecture
+
+```text
+PRIVATE MANAGEMENT
+Desktop -> Tailscale -> Image Manager :8090
+                         |
+                         v
+                /mnt/storage/shincabinet-images
+
+PUBLIC IMAGE DELIVERY
+Browser -> Cloudflare Tunnel -> Nginx :8080
+                                  |
+                  /normal/path    |    /i/img_...
+                     |            |       |
+                     v            |       v
+                 static HDD       |   proxy :8090
+                                  |       |
+                                  |       v
+                                  |   ID lookup + optional resize
+```
+
+The manager UI can remain Tailscale-only. Only `/i/` is proxied through the public Nginx image origin.
+
+## Install/update on the Pi
+
+For the dedicated Pi repo, a typical live checkout is:
+
+```text
+/opt/images.shincabinet.com-pimb4
+```
+
+Initial installation:
 
 ```bash
-cd /opt
-sudo git clone YOUR_REPOSITORY_URL shincabinet-image-manager
-sudo chown -R "$USER:$USER" /opt/shincabinet-image-manager
-cd /opt/shincabinet-image-manager
+cd /opt/images.shincabinet.com-pimb4
 sudo ./scripts/install.sh
 ```
 
-The installer:
+Then install the one-time Nginx dynamic-ID route:
 
-1. Creates `/mnt/storage/shincabinet-images` if needed.
-2. Creates a Python virtual environment.
-3. Installs Flask, Gunicorn and Pillow.
-4. Prompts for an admin password.
-5. Creates a random Flask session secret.
-6. Writes secrets to `/etc/shincabinet-image-manager.env`, not Git.
-7. Installs and starts a systemd service.
-8. Binds the application to `127.0.0.1:8090` only.
-9. Refuses to run if `/mnt/storage` is not actually mounted, preventing accidental microSD uploads.
+```bash
+sudo ./scripts/install-nginx-dynamic-route.sh
+```
+
+That adds a public read-only proxy for `/i/` to the already-local manager on `127.0.0.1:8090`, validates Nginx, makes a backup, and reloads Nginx.
 
 Verify:
 
 ```bash
-sudo ./scripts/check.sh
+sudo nginx -t
+sudo systemctl status shincabinet-image-manager --no-pager
+curl -I http://127.0.0.1:8090/health
 ```
 
-Or individually:
+After uploading an image, copy its ID from the manager and test:
 
 ```bash
-systemctl status shincabinet-image-manager
-curl http://127.0.0.1:8090/health
-ss -ltnp | grep 8090
+curl -I https://images.shincabinet.com/i/IMAGE_ID
+curl -I 'https://images.shincabinet.com/i/IMAGE_ID?max=512'
 ```
 
-Expected health response:
+Both should return `200` for a valid ID.
 
-```json
-{"ok":true}
-```
+## Cloudflare Tunnel
 
-## Add the private manager hostname to Cloudflare Tunnel
-
-In the Cloudflare Tunnel already running on the Pi, add another published application route:
-
-```text
-Hostname: manage-images.shincabinet.com
-Service:  HTTP
-URL:      localhost:8090
-```
-
-Do **not** point the management application at port `8080`; that is the public image origin.
-
-For the management hostname, use Cloudflare Access in front of the application if possible. The application also has its own password, so Access gives you a second authentication layer.
-
-The public hostname remains:
+No new Cloudflare hostname is required for dynamic IDs. Keep the existing public route:
 
 ```text
 images.shincabinet.com -> http://localhost:8080
 ```
 
-and the private administration hostname becomes:
+Nginx decides whether the request is a normal static path or `/i/<id>`.
 
-```text
-manage-images.shincabinet.com -> http://localhost:8090
-```
-
-## Configuration
-
-Runtime configuration is stored in:
-
-```text
-/etc/shincabinet-image-manager.env
-```
-
-Example:
-
-```dotenv
-SHIN_IMAGE_ROOT=/mnt/storage/shincabinet-images
-SHIN_STORAGE_MOUNT=/mnt/storage
-SHIN_REQUIRE_STORAGE_MOUNT=1
-SHIN_PUBLIC_BASE_URL=https://images.shincabinet.com
-SHIN_IMAGE_MANAGER_HOST=127.0.0.1
-SHIN_IMAGE_MANAGER_PORT=8090
-SHIN_IMAGE_MANAGER_PASSWORD=your-long-password
-SHIN_IMAGE_MANAGER_SECRET=a-long-random-secret
-SHIN_IMAGE_MANAGER_API_TOKEN=a-random-token-generated-by-the-installer
-SHIN_IMAGE_MANAGER_MAX_UPLOAD_MB=512
-SHIN_USE_CLOUDFLARE_THUMBNAILS=1
-SHIN_THUMBNAIL_SIZE=480
-SHIN_SECURE_COOKIE=1
-```
-
-After changing it:
-
-```bash
-sudo systemctl restart shincabinet-image-manager
-```
-
-See `API.md` for the optional API intended for future direct Site Manager integration.
+The administrative Image Manager can continue to be reached over Tailscale Serve; it does not need a public Cloudflare hostname.
 
 ## Normal workflow
 
-1. Open `https://manage-images.shincabinet.com`.
-2. Navigate/create the appropriate folder.
-3. Upload the original artwork.
-4. Click **Copy URL**.
-5. Paste that URL into the appropriate Gallery/Character/Adoptable field in the `shincabinet.com` Site Manager.
-6. Save/push the website metadata.
+1. Open the Raspberry Pi Image Manager over Tailscale.
+2. Upload an original.
+3. Copy its `img_...` ID.
+4. Open the primary `shincabinet.com` Site Manager.
+5. Paste the ID into a character/gallery/reference/etc. image assignment.
+6. Commit/push only website metadata.
+7. Later, use **Replace** in the Pi manager to swap the backing image without changing the website.
 
-The image itself never enters the website Git repository.
+## Security
 
-## Original vs web-sized versions
-
-The Image Manager does not modify originals. An uploaded `6000x4000` image stays `6000x4000` on the HDD and at its original URL.
-
-Your public website can request a capped version through Cloudflare Image Transformations, for example:
-
-```text
-https://images.shincabinet.com/cdn-cgi/image/fit=scale-down,width=2048,height=2048,format=auto/gallery/example.png
-```
-
-while the original remains:
-
-```text
-https://images.shincabinet.com/gallery/example.png
-```
-
-This repository uses the same approach for its own browsing thumbnails when `SHIN_USE_CLOUDFLARE_THUMBNAILS=1`.
-
-## Updating the manager
-
-```bash
-cd /opt/shincabinet-image-manager
-git pull
-./.venv/bin/pip install -r requirements.txt
-sudo systemctl restart shincabinet-image-manager
-```
-
-## Backups
-
-This manager intentionally does not treat GitHub as an image backup. Back up `/mnt/storage/shincabinet-images` separately. At minimum, maintain a second copy on another disk/system before treating the Pi as the only source of original artwork.
+The `/i/<id>` route is intentionally unauthenticated because it is the public artwork delivery route. The management UI and write APIs remain authenticated. Direct static files are still subject to your existing Nginx rules.

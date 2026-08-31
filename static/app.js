@@ -2,6 +2,8 @@ const csrf = document.querySelector('meta[name="csrf-token"]').content;
 let currentPath = '';
 let selectedFiles = [];
 let moveSource = '';
+let replaceImageId = '';
+let replaceImagePath = '';
 
 const grid = document.getElementById('grid');
 const message = document.getElementById('message');
@@ -85,16 +87,20 @@ function renderItems(items) {
     const meta = document.createElement('div'); meta.className = 'item-meta';
     if (item.type === 'image') {
       const dims = item.width && item.height ? `${item.width}×${item.height} · ` : '';
-      meta.textContent = `${dims}${humanBytes(item.size)}`;
+      meta.innerHTML = `${escapeHtml(dims)}${escapeHtml(humanBytes(item.size))}<br><code>${escapeHtml(item.id || '')}</code>`;
     } else meta.textContent = 'Folder';
     body.append(meta);
     const actions = document.createElement('div'); actions.className = 'item-actions';
     if (item.type === 'folder') actions.append(makeButton('Open', () => loadFolder(item.path)));
     else {
-      actions.append(makeButton('Copy URL', async () => {
+      actions.append(makeButton('Copy ID', async () => {
+        await navigator.clipboard.writeText(item.id); flash(`Copied ${item.id}`);
+      }));
+      actions.append(makeButton('Copy stable URL', async () => {
         await navigator.clipboard.writeText(item.url); flash(`Copied ${item.url}`);
       }));
-      const open = document.createElement('a'); open.href = item.url; open.target = '_blank'; open.rel = 'noopener'; open.textContent = 'Open original'; actions.append(open);
+      actions.append(makeButton('Replace', () => openReplace(item), 'secondary'));
+      const open = document.createElement('a'); open.href = item.url; open.target = '_blank'; open.rel = 'noopener'; open.textContent = 'Open by ID'; actions.append(open);
     }
     actions.append(makeButton('Rename / move', () => openMove(item.path), 'secondary'));
     actions.append(makeButton('Delete', () => deleteItem(item), 'danger'));
@@ -157,6 +163,34 @@ document.getElementById('move-form').addEventListener('submit', async event => {
   try {
     await api('/api/move', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({source:moveSource,destination})});
     moveDialog.close(); flash('Moved successfully.'); await loadFolder(currentPath);
+  } catch (error) { flash(error.message, 'error'); }
+});
+
+const replaceDialog = document.getElementById('replace-dialog');
+function openReplace(item) {
+  replaceImageId = item.id;
+  replaceImagePath = item.path;
+  document.getElementById('replace-id').textContent = item.id;
+  document.getElementById('replace-file').value = '';
+  replaceDialog.showModal();
+}
+
+document.getElementById('replace-form').addEventListener('submit', async event => {
+  if (event.submitter?.value === 'cancel') return;
+  event.preventDefault();
+  const input = document.getElementById('replace-file');
+  const file = input.files?.[0];
+  if (!file) return flash('Select a replacement image.', 'error');
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const response = await fetch(`/api/image/${encodeURIComponent(replaceImageId)}/replace`, {method:'POST', headers:{'X-CSRF-Token':csrf}, body:form});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Replacement failed (${response.status})`);
+    replaceDialog.close();
+    flash(`Replaced image. ID ${replaceImageId} is unchanged.`);
+    await loadFolder(currentPath);
+    await loadConfig();
   } catch (error) { flash(error.message, 'error'); }
 });
 
