@@ -195,6 +195,21 @@ def delete_alias(site_image_id: str) -> bool:
     return existed
 
 
+def prune_aliases_unlocked(registry: dict, removed_image_ids: set[str] | None = None) -> int:
+    """Remove aliases that no longer point at a registered image."""
+    aliases = registry.setdefault("aliases", {})
+    images = registry.setdefault("images", {})
+    removed = set(removed_image_ids or ())
+    stale = [
+        site_image_id
+        for site_image_id, image_id in aliases.items()
+        if image_id in removed or image_id not in images
+    ]
+    for site_image_id in stale:
+        aliases.pop(site_image_id, None)
+    return len(stale)
+
+
 def cache_path_for(image_id: str, revision: int, max_dimension: int, source: Path) -> Path:
     suffix = source.suffix.lower()
     return DERIVATIVE_ROOT / image_id / f"r{revision}-max{max_dimension}{suffix}"
@@ -272,12 +287,16 @@ def reconcile_registry() -> None:
         registry = load_registry_unlocked()
         images = registry["images"]
         changed = False
+        removed_ids: set[str] = set()
         for image_id in list(images):
             entry = images[image_id]
             if not isinstance(entry, dict) or entry.get("path") not in paths:
                 images.pop(image_id, None)
+                removed_ids.add(image_id)
                 clear_derivatives(image_id)
                 changed = True
+        if prune_aliases_unlocked(registry, removed_ids):
+            changed = True
         indexed = {entry.get("path") for entry in images.values() if isinstance(entry, dict)}
         for relative_text in sorted(paths - indexed):
             image_id = new_image_id(registry)
@@ -930,6 +949,7 @@ def api_delete():
                 registry["images"].pop(image_id, None)
                 removed_ids.append(image_id)
         if removed_ids:
+            prune_aliases_unlocked(registry, set(removed_ids))
             save_registry_unlocked(registry)
     for image_id in removed_ids:
         clear_derivatives(image_id)
