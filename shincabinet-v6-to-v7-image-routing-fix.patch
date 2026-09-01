@@ -1,0 +1,287 @@
+diff --git a/IMAGE_IDS.md b/IMAGE_IDS.md
+index 38a71be..53efd9d 100644
+--- a/IMAGE_IDS.md
++++ b/IMAGE_IDS.md
+@@ -6,9 +6,7 @@ The preferred image value everywhere in manager-owned site configuration is a pe
+ img_9f73c215bf6a46b78973b6317dc16c3a
+ ```
+ 
+-Do not store the physical HDD path in website metadata. Do not store a direct image URL for new content.
+-
+-The runtime maps the ID through the configured image host:
++The runtime resolves that ID through the configured image host:
+ 
+ ```text
+ img_9f73... -> https://images.shincabinet.com/i/img_9f73...
+@@ -20,6 +18,18 @@ With `maxImageDimension: 2048`, normal page images request:
+ https://images.shincabinet.com/i/img_9f73...?max=2048
+ ```
+ 
+-Artwork dialogs link to the original stable ID URL without `?max=`.
++Artwork dialogs link to the untouched original stable ID URL without `?max=`.
++
++## Routing rules
++
++The website deliberately has only three image-reference behaviors:
++
++1. `img_...` IDs resolve through `https://images.shincabinet.com/i/<id>`.
++2. Legacy `/assets/images/...` paths stay local on `shincabinet.com` until you explicitly replace them with an ID.
++3. Explicit `https://...` image URLs are used exactly as entered.
++
++The website does **not** rewrite legacy local paths to `images.shincabinet.com` and does **not** generate Cloudflare `/cdn-cgi/image/` URLs. This prevents a legacy filename from becoming a remote 404 when the Pi stores that image under a different physical path.
++
++## Migration
+ 
+-The Site Manager still accepts direct image-host URLs and legacy `/assets/images/...` paths so existing entries can be migrated. Pasting a stable `/i/img_...` URL is canonicalized back to the ID before it is saved.
++Upload/find the artwork in the Raspberry Pi Image Manager, copy its permanent `img_...` ID, then replace the legacy path in Site Manager. You can migrate one image at a time without breaking the remaining local gallery.
+diff --git a/README.md b/README.md
+index c7a32e9..fd98c93 100644
+--- a/README.md
++++ b/README.md
+@@ -198,46 +198,13 @@ The stored shape is optional and backward-compatible:
+ 
+ ## Remote image host
+ 
+-Artwork storage is intentionally separate from this GitHub repository. The Raspberry Pi image manager owns the physical files and the ID-to-file registry under `/mnt/storage/shincabinet-images`, while this website stores only permanent image IDs and metadata.
++Artwork migration uses permanent Raspberry Pi Image Manager IDs. Store `img_...` in site metadata; the browser resolves it through `https://images.shincabinet.com/i/<id>`.
+ 
+-Preferred new references look like:
++Legacy `/assets/images/...` references remain local until explicitly replaced with an ID. Direct HTTPS image URLs are used as entered. The public website never rewrites a legacy local path to the image host and no longer generates Cloudflare `/cdn-cgi/image/` transformation URLs.
+ 
+-```text
+-https://images.shincabinet.com/gallery/example/primary.webp
+-https://images.shincabinet.com/characters/shinji/reference/main.png
+-```
+-
+-Use the separate `images.shincabinet.com-pimb4` Image Manager to upload, rename, move, or delete files. Copy the public URL from that manager and paste it into this Site Manager's character, artwork-detail, or image-assignment fields. The website Site Manager never writes new artwork into `assets/images/`.
+-
+-### Legacy migration
+-
+-Existing `/assets/images/...` references remain supported while the old repository artwork is migrated. If **Map legacy /assets/images paths to image host** is enabled, this:
+-
+-```text
+-/assets/images/gallery/full/example.webp
+-```
+-
+-is served from:
+-
+-```text
+-https://images.shincabinet.com/gallery/full/example.webp
+-```
+-
+-Do not enable that legacy mapping until the corresponding files are present on the Raspberry Pi. New direct `https://images.shincabinet.com/...` references work whether the legacy switch is on or off.
+-
+-The long-term target is for GitHub to contain no portfolio/reference artwork. Static branding assets can also be migrated to the image host once their HTML/manifest references are changed and their remote URLs are verified.
+-
+-### Maximum served resolution
+-
+-When **Use Cloudflare image transformations** is enabled, the public site requests a transformed URL bounded by the configured maximum dimension. A setting of `2048` means the served image fits within a `2048 × 2048` box, keeps its aspect ratio, and is never upscaled. The untouched original remains available on `images.shincabinet.com`, and gallery/reference dialogs expose an **Open original image** link.
+-
+-For example:
+-
+-```text
+-https://images.shincabinet.com/cdn-cgi/image/fit=scale-down,width=2048,height=2048,format=auto,onerror=redirect/gallery/example/primary.webp
+-```
++`site.media.maxImageDimension` controls the Pi Image Manager derivative request for ID-backed images. For example, `2048` requests `/i/<id>?max=2048` while **Open original image** uses `/i/<id>` without resizing.
+ 
+-Cloudflare Image Transformations must be enabled for the `shincabinet.com` zone. If transformations are disabled or the maximum is `0`, the original remote image is served directly.
++See `IMAGE_IDS.md` for the complete routing and migration model.
+ 
+ ## Dynamic image IDs
+ 
+diff --git a/assets/js/content.js b/assets/js/content.js
+index 4110a4c..42f7dee 100644
+--- a/assets/js/content.js
++++ b/assets/js/content.js
+@@ -19,10 +19,8 @@ window.SHIN_SITE = {
+     "fursuitStatus": "Not published",
+     "fursuitNote": "This page is not published yet.",
+     "media": {
+-      "remoteImagesEnabled": false,
+       "imageHost": "https://images.shincabinet.com",
+-      "maxImageDimension": 2048,
+-      "cloudflareTransformationsEnabled": true
++      "maxImageDimension": 2048
+     },
+     "specialties": [
+       "Character art",
+diff --git a/assets/js/site.js b/assets/js/site.js
+index 1fe8606..de6a060 100644
+--- a/assets/js/site.js
++++ b/assets/js/site.js
+@@ -40,57 +40,29 @@
+ 
+     const host = mediaHost();
+ 
+-    // Dynamic image IDs are the preferred format. The ID remains stable even
+-    // when the Raspberry Pi Image Manager replaces or moves the backing file.
++    // Permanent dynamic IDs are the only references that are resolved through
++    // the Raspberry Pi image host. Legacy /assets/images/... paths stay local
++    // until they are explicitly replaced with an img_... ID in Site Manager.
+     if (isDynamicImageId(raw)) return host ? `${host}/i/${encodeURIComponent(raw.toLowerCase())}` : raw;
+ 
+-    // Explicit remote URLs and legacy /assets/images/... references remain
+-    // supported while older content is migrated to IDs.
+-    if (isAbsoluteHttpUrl(raw)) return raw;
+-
+-
+-    if (mediaConfig.remoteImagesEnabled !== true || !host || !isManagedLocalImage(raw)) return raw;
+-
+-    const [pathAndQuery, hash = ""] = raw.split("#", 2);
+-    const relative = pathAndQuery.replace(/^\/assets\/images\//, "");
+-    return `${host}/${relative}${hash ? `#${hash}` : ""}`;
+-  }
+-
+-  function canTransformImage(original) {
+-    if (mediaConfig.cloudflareTransformationsEnabled !== true) return false;
+-    const max = Number(mediaConfig.maxImageDimension || 0);
+-    if (!Number.isFinite(max) || max <= 0) return false;
+-    const host = mediaHost();
+-    if (!host || !original) return false;
+-    try {
+-      const source = new URL(original, location.origin);
+-      const imageHost = new URL(host, location.origin);
+-      return source.origin === imageHost.origin;
+-    } catch {
+-      return false;
+-    }
++    // Explicit URLs remain explicit. Never rewrite local legacy paths to the
++    // remote host: doing so creates 404s when the physical Pi path differs.
++    return raw;
+   }
+ 
+   function servedImageUrl(value) {
+     const raw = String(value || "").trim();
+     const original = originalImageUrl(raw);
+ 
+-    // ID-backed images are resized by the Pi Image Manager itself. This keeps
+-    // the public ID stable and avoids stale Cloudflare transformation caches
+-    // when the file behind an ID is replaced.
++    // ID-backed images are resized by the Pi Image Manager. The original is
++    // untouched and remains available at /i/<id> without ?max=.
+     if (isDynamicImageId(raw)) {
+       const max = Math.round(Number(mediaConfig.maxImageDimension || 0));
+       return Number.isFinite(max) && max > 0 ? `${original}?max=${Math.max(1, max)}` : original;
+     }
+ 
+-    if (!canTransformImage(original)) return original;
+-
+-    const max = Math.max(1, Math.round(Number(mediaConfig.maxImageDimension)));
+-    const host = mediaHost();
+-    const source = new URL(original);
+-    const sourcePath = source.pathname.replace(/^\/+/, "");
+-    const options = `fit=scale-down,width=${max},height=${max},format=auto,onerror=redirect`;
+-    return `${host}/cdn-cgi/image/${options}/${sourcePath}${source.search}`;
++    // Legacy local paths and direct URLs are served exactly as stored.
++    return original;
+   }
+ 
+   function originalFromDynamicUrl(value) {
+@@ -107,36 +79,15 @@
+     }
+   }
+ 
+-  function originalFromTransformedUrl(value) {
+-    const raw = String(value || "").trim();
+-    if (!raw) return "";
+-    try {
+-      const url = new URL(raw, location.origin);
+-      const marker = "/cdn-cgi/image/";
+-      const markerIndex = url.pathname.indexOf(marker);
+-      if (markerIndex < 0) return "";
+-      const remainder = url.pathname.slice(markerIndex + marker.length);
+-      const optionEnd = remainder.indexOf("/");
+-      if (optionEnd < 0) return "";
+-      const sourcePath = remainder.slice(optionEnd + 1);
+-      if (!sourcePath) return "";
+-      return `${url.origin}/${sourcePath}${url.search}`;
+-    } catch {
+-      return "";
+-    }
+-  }
+-
+-  // Cloudflare Image Transformations are an optimization, not a hard
+-  // dependency. If the transformed request fails (disabled feature, stale
+-  // edge response, unsupported source, etc.), retry the untouched original
+-  // exactly once so artwork never disappears from the site.
++  // Resizing is optional. If the Pi derivative request fails, retry the stable
++  // original ID URL once. Legacy local paths never leave the primary site.
+   document.addEventListener("error", (event) => {
+     const image = event.target;
+     if (!(image instanceof HTMLImageElement)) return;
+     if (image.dataset.originalFallbackTried === "1") return;
+ 
+     const current = image.currentSrc || image.src || "";
+-    const fallback = image.dataset.originalImage || originalFromDynamicUrl(current) || originalFromTransformedUrl(current);
++    const fallback = image.dataset.originalImage || originalFromDynamicUrl(current);
+     if (!fallback || fallback === current) return;
+ 
+     image.dataset.originalFallbackTried = "1";
+diff --git a/tools/site-manager.html b/tools/site-manager.html
+index d493de8..2d9bb02 100644
+--- a/tools/site-manager.html
++++ b/tools/site-manager.html
+@@ -87,7 +87,7 @@
+       <div class="editor"><div class="form-grid" id="site-fields"></div>
+         <div class="subsection">
+           <h3>Remote image hosting</h3>
+-          <p class="muted">New artwork should use permanent <code>img_…</code> IDs copied from the Raspberry Pi Image Manager. The ID stays the same when the backing file is replaced or moved. Direct URLs and legacy <code>/assets/images/…</code> paths remain supported only for migration.</p>
++          <p class="muted">New artwork should use permanent <code>img_…</code> IDs copied from the Raspberry Pi Image Manager. The ID stays the same when the backing file is replaced or moved. Direct URLs remain supported for migration. Legacy <code>/assets/images/…</code> paths always stay local until explicitly replaced with an <code>img_…</code> ID.</p>
+           <div class="form-grid" id="media-fields"></div>
+         </div>
+       </div>
+@@ -226,13 +226,11 @@ function renderSettings(){
+   const s=state.content.site||{},m=s.media||{};
+   $('#site-fields').innerHTML=siteFields.map(([k,l])=>`<div class="field ${['intro','profileBlurb','commissionNote','fursuitNote'].includes(k)?'full':''}"><span>${esc(l)}</span><input class="input" data-site="${k}" value="${esc(s[k]||'')}"></div>`).join('');
+   $('#media-fields').innerHTML=`
+-    <div class="switch-row"><label for="media-remote">Map legacy /assets/images paths to image host (migration only)</label><input type="checkbox" id="media-remote" ${m.remoteImagesEnabled===true?'checked':''}></div>
+-    <div class="switch-row"><label for="media-transform">Use Cloudflare transformations for legacy/direct URL images</label><input type="checkbox" id="media-transform" ${m.cloudflareTransformationsEnabled!==false?'checked':''}></div>
+-    <label class="field full"><span>Image host</span><input class="input" id="media-host" value="${esc(m.imageHost||'https://images.shincabinet.com')}" placeholder="https://images.shincabinet.com"><span class="help">Dynamic img_… IDs resolve through /i/&lt;id&gt;. This host also supports old direct URLs and legacy paths during migration.</span></label>
+-    <label class="field"><span>Maximum served dimension <span class="help">pixels; 0 disables resizing</span></span><input class="input" id="media-max-dimension" type="number" min="0" max="12000" step="1" value="${esc(m.maxImageDimension??2048)}"></label>
+-    <div class="field"><span>What this does</span><div class="muted">For img_… IDs, the Raspberry Pi Image Manager serves a cached derivative bounded by this size while keeping the original untouched. Replacing the backing file under the same ID invalidates its derivatives automatically. Legacy/direct URLs can still use Cloudflare transformations.</div></div>`;
++    <label class="field full"><span>Image host</span><input class="input" id="media-host" value="${esc(m.imageHost||'https://images.shincabinet.com')}" placeholder="https://images.shincabinet.com"><span class="help">Only permanent <code>img_…</code> IDs resolve through this host at <code>/i/&lt;id&gt;</code>. Legacy <code>/assets/images/…</code> references always remain local until you explicitly replace them with an image ID.</span></label>
++    <label class="field"><span>Maximum served dimension <span class="help">pixels; 0 serves the original</span></span><input class="input" id="media-max-dimension" type="number" min="0" max="12000" step="1" value="${esc(m.maxImageDimension??2048)}"></label>
++    <div class="field"><span>Image routing</span><div class="muted"><code>img_…</code> → Raspberry Pi dynamic endpoint. <code>/assets/images/…</code> → this website. Explicit HTTPS URLs → used exactly as entered. The website no longer generates Cloudflare <code>/cdn-cgi/image/</code> URLs.</div></div>`;
+ }
+-$('#save-site').addEventListener('click',async()=>{try{const site={};$$('[data-site]').forEach(i=>site[i.dataset.site]=i.value);site.media={remoteImagesEnabled:$('#media-remote').checked,imageHost:$('#media-host').value.trim(),maxImageDimension:Number($('#media-max-dimension').value||0),cloudflareTransformationsEnabled:$('#media-transform').checked};await api('/api/site/save',{site});await loadState(false);notify('Site settings saved to disk · preview refreshed')}catch(e){notify(e.message,true)}});
++$('#save-site').addEventListener('click',async()=>{try{const site={};$$('[data-site]').forEach(i=>site[i.dataset.site]=i.value);site.media={imageHost:$('#media-host').value.trim(),maxImageDimension:Number($('#media-max-dimension').value||0)};await api('/api/site/save',{site});await loadState(false);notify('Site settings saved to disk · preview refreshed')}catch(e){notify(e.message,true)}});
+ loadState();
+ </script>
+ </body>
+diff --git a/tools/site_manager.py b/tools/site_manager.py
+index 4e5707e..9c48f31 100644
+--- a/tools/site_manager.py
++++ b/tools/site_manager.py
+@@ -377,8 +377,8 @@ def public_original_image_url(image_url: str) -> str:
+         return f"{host}/i/{clean}" if host else clean
+     if is_remote_image_url(clean):
+         return clean
+-    if media.get("remoteImagesEnabled") is True and host:
+-        return f"{host}/{clean.removeprefix('/assets/images/')}"
++    # Legacy /assets/images/... references always stay local. Only img_... IDs
++    # resolve through the remote host.
+     return clean
+ 
+ 
+@@ -405,9 +405,7 @@ def validate_image_reference(image_url: str) -> str:
+     target = image_file_from_url(clean, require_exists=False)
+     if target.exists() and target.is_file():
+         return clean
+-    if media.get("remoteImagesEnabled") is True and host:
+-        return clean
+-    raise ValueError("Legacy image file does not exist locally and legacy remote mapping is disabled.")
++    raise ValueError("Legacy image file does not exist locally. Upload it to the Pi and use its img_... ID instead.")
+ 
+ 
+ def referenced_image_urls() -> set[str]:
+@@ -953,10 +951,8 @@ class Handler(SimpleHTTPRequestHandler):
+             if max_dimension < 0 or max_dimension > 12000:
+                 raise ValueError("Maximum image dimension must be between 0 and 12000 pixels.")
+             existing["media"] = {
+-                "remoteImagesEnabled": bool(media.get("remoteImagesEnabled", False)),
+                 "imageHost": image_host,
+                 "maxImageDimension": max_dimension,
+-                "cloudflareTransformationsEnabled": bool(media.get("cloudflareTransformationsEnabled", False)),
+             }
+         write_assignment(CONTENT_FILE, variable, content, CONTENT_HEADER)
+         json_response(self, 200, {"ok": True, "manager": manager_diagnostics()})
